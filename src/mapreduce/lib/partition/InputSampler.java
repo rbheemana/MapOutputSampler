@@ -21,7 +21,9 @@ package org.apache.hadoop.mapreduce.lib.partition;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import org.apache.commons.logging.Log;
@@ -38,11 +40,15 @@ import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.mapreduce.InputFormat;
 import org.apache.hadoop.mapreduce.InputSplit;
+import org.apache.hadoop.mapred.FileSplit;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.RecordReader;
+import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.TaskAttemptID;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat;
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.Tool;
@@ -129,12 +135,9 @@ public class InputSampler<K,V> extends Configured implements Tool  {
      * @param samplingPath The path to get sample records from
      */
     public SplitSampler(int numSamples, int maxSplitsSampled, Path samplingPath) {
-
       this.numSamples = numSamples;
       this.maxSplitsSampled = maxSplitsSampled;
-
       this.samplingPath = samplingPath;
-
     }
 
     /**
@@ -147,17 +150,11 @@ public class InputSampler<K,V> extends Configured implements Tool  {
       
       /* If sampling path is specified remove splits from other paths*/
       if (samplingPath != null){
-
-	for (int i = 0; i < splits.size(); ++i) {
-
-	  if (!((FileSplit) splits.get(i)).getPath().toString().contains(samplingPath.toString())){
-
-	    splits.remove(i);
-
-	  }
-
+        for (int i = 0; i < splits.size(); ++i) {
+          if (!((FileSplit) splits.get(i)).getPath().toString().contains(samplingPath.toString())){
+        	 splits.remove(i);
+          }
         }
-
       }
       HashMap<K, V> samples = new HashMap<K, V>(numSamples);
       int splitsToSample = Math.min(maxSplitsSampled, splits.size());
@@ -173,8 +170,7 @@ public class InputSampler<K,V> extends Configured implements Tool  {
           samples.put(ReflectionUtils.copy(job.getConfiguration(),
                                            reader.getCurrentKey(), null),
                       ReflectionUtils.copy(job.getConfiguration(),
-
-					   reader.getCurrentValue(), null));
+                    		  			   reader.getCurrentValue(), null));
           ++records;
           if ((i+1) * samplesPerSplit <= records) {
             break;
@@ -230,7 +226,7 @@ public class InputSampler<K,V> extends Configured implements Tool  {
      * @param maxSplitsSampled The maximum number of splits to examine.
      * @param samplingPath The path to get sample records from
      */
-    public RandomSampler(double freq, int numSamples, int maxSplitsSampled) {
+    public RandomSampler(double freq, int numSamples, int maxSplitsSampled, Path samplingPath) {
       this.freq = freq;
       this.numSamples = numSamples;
       this.maxSplitsSampled = maxSplitsSampled;
@@ -249,17 +245,11 @@ public class InputSampler<K,V> extends Configured implements Tool  {
       List<InputSplit> splits = inf.getSplits(job);
       /* If sampling path is specified remove splits from other paths*/
       if (samplingPath != null){
-
-	for (int i = 0; i < splits.size(); ++i) {
-
-	  if (!((FileSplit) splits.get(i)).getPath().toString().contains(samplingPath.toString())){
-
-	    splits.remove(i);
-
-	  }
-
+        for (int i = 0; i < splits.size(); ++i) {
+          if (!((FileSplit) splits.get(i)).getPath().toString().contains(samplingPath.toString())){
+            splits.remove(i);
+          }
         }
-
       }
       HashMap<K, V> samples = new HashMap<K, V>(numSamples);
       int splitsToSample = Math.min(maxSplitsSampled, splits.size());
@@ -290,10 +280,8 @@ public class InputSampler<K,V> extends Configured implements Tool  {
             if (samples.size() < numSamples) {
               samples.put(ReflectionUtils.copy(job.getConfiguration(),
                                                reader.getCurrentKey(), null),
-
-			  ReflectionUtils.copy(job.getConfiguration(),
-
-					       reader.getCurrentValue(), null));
+                          ReflectionUtils.copy(job.getConfiguration(),
+                        		               reader.getCurrentValue(), null));
             } else {
               // When exceeding the maximum number of samples, replace a
               // random element with this one, then adjust the frequency
@@ -301,16 +289,11 @@ public class InputSampler<K,V> extends Configured implements Tool  {
               // pushed out
               int ind = r.nextInt(numSamples);
               if (ind != numSamples) {
-
-		samples.put(ReflectionUtils.copy(job.getConfiguration(),
-
-					       reader.getCurrentKey(), null),
-
-			    ReflectionUtils.copy(job.getConfiguration(),
-
-					       reader.getCurrentValue(), null));
-
-	      }
+                samples.put(ReflectionUtils.copy(job.getConfiguration(),
+                reader.getCurrentKey(), null),
+                ReflectionUtils.copy(job.getConfiguration(),
+                reader.getCurrentValue(), null));
+	          }
               freq *= (numSamples - 1) / (double) numSamples;
             }
           }
@@ -371,17 +354,15 @@ public class InputSampler<K,V> extends Configured implements Tool  {
           ++records;
           if ((double) kept / records < freq) {
             samples.put(ReflectionUtils.copy(job.getConfiguration(),
-                                 reader.getCurrentKey(), null),
-
-		        ReflectionUtils.copy(job.getConfiguration(),
-
-				 reader.getCurrentValue(), null));
+            reader.getCurrentKey(), null),
+            ReflectionUtils.copy(job.getConfiguration(),
+            reader.getCurrentValue(), null));
             ++kept;
           }
         }
         reader.close();
       }
-      return (K[])samples.toArray();
+      return samples;
     }
   }
 
@@ -399,161 +380,83 @@ public class InputSampler<K,V> extends Configured implements Tool  {
         ReflectionUtils.newInstance(job.getInputFormatClass(), conf);
     int numPartitions = job.getNumReduceTasks();
     HashMap<K, V> samples = (HashMap<K, V>) sampler.getSample(inf, job);
-    LOG.info("Using " + samples.length + " samples");
+    LOG.info("Using " + samples.size() + " samples");
     // write the input samples in to file <partitionfile>/mapIn
-
     Path dstOut = new Path(TotalOrderPartitioner.getPartitionFile(conf));
-
     Path dst = new Path(dstOut, "mapIn");
-
     FileSystem fs = dst.getFileSystem(conf);
-
     SequenceFile.Writer sampleWriter = null;
-
     for (Map.Entry<K, V> sample : samples.entrySet()) {
-
       sampleWriter = SequenceFile.createWriter(fs, conf, dst, 
                              sample.getKey().getClass(), 
                              sample.getValue().getClass());
 
 			break;
-
     }
-
     for (Map.Entry<K, V> sample : samples.entrySet()) {
-
       sampleWriter.append(sample.getKey(), sample.getValue());
-
     }
-
     sampleWriter.close();
-
     LOG.info("Sample Input File location " + dst.toString());
-
     // run map reduce on the samples input
-
     runMap(job, dst);
-
   }
 
   
   /**
-
    * Reduce class to write the only MapOut Key to output file
-
    */
 
   public static class SampleKeyReducer<OK, OV> extends
-
 			Reducer<OK, OV, OK, NullWritable> {
-
     long count = 0;
-
     @Override
-
     protected void reduce(OK fileKey, Iterable<OV> values, Context output)
-
 				throws IOException, InterruptedException {
-
       if (count < Long.parseLong(output.getConfiguration().get(
-
 					"numSamples"))) {
-
-	output.write(fileKey, NullWritable.get());
-
-	count++;
-
+	      output.write(fileKey, NullWritable.get());
+	      count++;
       }
-
     }
   }
   /**
    * Driver for InputSampler MapReduce Job
-
    */
 
   public static void runMap(Job job, Path sampleInputPath)
-
 	 throws IOException, IllegalStateException, ClassNotFoundException,
-
 		InterruptedException {
-
     LOG.info("Running a MapReduce Job on Sample Input File"
-
 	      + sampleInputPath.toString());
-
-
-
     Configuration conf = new Configuration();
-
     conf.setBoolean("mapreduce.job.ubertask.enable", true);
-
     conf.set("numSamples", "" + (job.getNumReduceTasks() - 1));
-
     Job sampleJob = new Job(conf);
-
     sampleJob.setMapperClass(job.getMapperClass());
-
     sampleJob.setReducerClass(SampleKeyReducer.class);
-
     sampleJob.setJarByClass(job.getMapperClass());
-
     sampleJob.setMapOutputKeyClass(job.getMapOutputKeyClass());
-
     sampleJob.setMapOutputValueClass(job.getMapOutputValueClass());
-
     sampleJob.setOutputKeyClass(job.getMapOutputKeyClass());
-
     sampleJob.setOutputValueClass(NullWritable.class);
-
     sampleJob.setInputFormatClass(SequenceFileInputFormat.class);
-
-    sampleJob.setOutputFormatClass(SequenceFileOutputFormat.class);
-
-
-
+    //sampleJob.setOutputFormatClass(SequenceFileOutputFormat.class);
     SequenceFileInputFormat.addInputPath(sampleJob, sampleInputPath);
-
     FileSystem fs = FileSystem.get(conf);
-
-
-
     Path out = new Path(sampleInputPath.getParent(), "mapOut");
-
     fs.delete(out, true);
-
-
-
     SequenceFileOutputFormat.setOutputPath(sampleJob, out);
-
-
-
     sampleJob.waitForCompletion(true);
-
-
-
     LOG.info("Sample MapReduce Job Output File" + out.toString());
-
-
-
     Path partFile = new Path(out, "part-r-00000");
-
     Path tmpFile = new Path("/_tmp");
-
     fs.delete(tmpFile,true);
-
     fs.rename(partFile, tmpFile);
-
     fs.delete(sampleInputPath.getParent(), true);
-
     fs.rename(new Path("/_tmp"), sampleInputPath.getParent());
-
-
-
     LOG.info("Sample partitioning file cpied to location "
-
 		+ sampleInputPath.getParent().toString());
-
   }
   /**
    * Driver for InputSampler from the command line.
