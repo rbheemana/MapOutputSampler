@@ -20,6 +20,8 @@ package org.apache.hadoop.mapred.lib;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 import org.apache.commons.logging.Log;
@@ -57,7 +59,7 @@ public class InputSampler<K,V> extends
      * For a given job, collect and return a subset of the keys from the
      * input data.
      */
-    K[] getSample(InputFormat<K,V> inf, JobConf job) throws IOException;
+    Map<K,V> getSample(InputFormat<K,V> inf, JobConf job) throws IOException;
   }
 
   /**
@@ -92,9 +94,9 @@ public class InputSampler<K,V> extends
      * From each split sampled, take the first numSamples / numSplits records.
      */
     @SuppressWarnings("unchecked") // ArrayList::toArray doesn't preserve type
-    public K[] getSample(InputFormat<K,V> inf, JobConf job) throws IOException {
+    public Map<K, V>  getSample(InputFormat<K,V> inf, JobConf job) throws IOException {
       InputSplit[] splits = inf.getSplits(job, job.getNumMapTasks());
-      ArrayList<K> samples = new ArrayList<K>(numSamples);
+      HashMap<K,V> samples = new HashMap<K, V>(numSamples);
       int splitsToSample = Math.min(maxSplitsSampled, splits.length);
       int splitStep = splits.length / splitsToSample;
       int samplesPerSplit = numSamples / splitsToSample;
@@ -105,7 +107,7 @@ public class InputSampler<K,V> extends
         K key = reader.createKey();
         V value = reader.createValue();
         while (reader.next(key, value)) {
-          samples.add(key);
+          samples.put(key,value);
           key = reader.createKey();
           ++records;
           if ((i+1) * samplesPerSplit <= records) {
@@ -114,7 +116,7 @@ public class InputSampler<K,V> extends
         }
         reader.close();
       }
-      return (K[])samples.toArray();
+      return samples;
     }
   }
 
@@ -156,9 +158,9 @@ public class InputSampler<K,V> extends
      * the quota of keys from that split is satisfied.
      */
     @SuppressWarnings("unchecked") // ArrayList::toArray doesn't preserve type
-    public K[] getSample(InputFormat<K,V> inf, JobConf job) throws IOException {
+    public Map<K, V> getSample(InputFormat<K,V> inf, JobConf job) throws IOException {
       InputSplit[] splits = inf.getSplits(job, job.getNumMapTasks());
-      ArrayList<K> samples = new ArrayList<K>(numSamples);
+      HashMap<K, V> samples = new HashMap<K, V>(numSamples);
       int splitsToSample = Math.min(maxSplitsSampled, splits.length);
 
       Random r = new Random();
@@ -184,7 +186,7 @@ public class InputSampler<K,V> extends
         while (reader.next(key, value)) {
           if (r.nextDouble() <= freq) {
             if (samples.size() < numSamples) {
-              samples.add(key);
+              samples.put(key, value);
             } else {
               // When exceeding the maximum number of samples, replace a
               // random element with this one, then adjust the frequency
@@ -192,7 +194,7 @@ public class InputSampler<K,V> extends
               // pushed out
               int ind = r.nextInt(numSamples);
               if (ind != numSamples) {
-                samples.set(ind, key);
+                samples.put(key, value);
               }
               freq *= (numSamples - 1) / (double) numSamples;
             }
@@ -201,7 +203,7 @@ public class InputSampler<K,V> extends
         }
         reader.close();
       }
-      return (K[])samples.toArray();
+      return samples;
     }
   }
 
@@ -237,9 +239,9 @@ public class InputSampler<K,V> extends
      * frequency.
      */
     @SuppressWarnings("unchecked") // ArrayList::toArray doesn't preserve type
-    public K[] getSample(InputFormat<K,V> inf, JobConf job) throws IOException {
+    public Map<K, V> getSample(InputFormat<K,V> inf, JobConf job) throws IOException {
       InputSplit[] splits = inf.getSplits(job, job.getNumMapTasks());
-      ArrayList<K> samples = new ArrayList<K>();
+      HashMap<K, V> samples = new HashMap<K, V>();
       int splitsToSample = Math.min(maxSplitsSampled, splits.length);
       int splitStep = splits.length / splitsToSample;
       long records = 0;
@@ -253,13 +255,13 @@ public class InputSampler<K,V> extends
           ++records;
           if ((double) kept / records < freq) {
             ++kept;
-            samples.add(key);
+            samples.put(key,value);
             key = reader.createKey();
           }
         }
         reader.close();
       }
-      return (K[])samples.toArray();
+      return samples;
     }
   }
 
